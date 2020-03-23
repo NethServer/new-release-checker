@@ -1,0 +1,4 @@
+language: ruby
+
+script:
+- bash check-new-release
