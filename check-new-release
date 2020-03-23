@@ -1,0 +1,106 @@
+#!/bin/bash
+
+if [ -z "$GITHUBTOKEN" ]; then
+    echo "GITHUBTOKEN not set"
+    exit 2
+fi
+
+# Mattermost upstream version
+
+tags=$(curl -sH "Authorization: token $GITHUBTOKEN" "https://api.github.com/repos/mattermost/mattermost-server/tags")
+
+error_msg=$(echo "$tags" | jq -r '.message?')
+
+if [ -n "$error_msg" ] && [ "$error_msg" != "null" ]; then
+    echo "Error retrieving upstream tags: $error_msg"
+    exit 1
+fi
+
+# echo "tags: $tags" # ////
+
+# echo "first tag: $(echo "$tags" | jq -r '.[0].name')" # ////
+
+upstream_version=$(echo "$tags" | jq -r '.[0].name' | sed -E 's/v//g')
+
+if [ -z "$upstream_version" ]; then
+    echo "Unable to retrieve upstream version"
+    exit 1
+elif [[ $upstream_version == *"RC"* ]] || [[ $upstream_version == *"rc"* ]] || [[ $upstream_version == *"beta"* ]]; then
+    echo "Latest upstream version is RC or beta: $upstream_version. Skipping"
+    exit 0
+fi
+
+# Nethserver Mattermost version
+nethserver_version=$(curl -sH "Authorization: token $GITHUBTOKEN" https://raw.githubusercontent.com/NethServer/nethserver-mattermost/master/nethserver-mattermost.spec |
+    grep "%define mattermost_release" | awk '{print $3}')
+
+echo "Upstream version: $upstream_version  Nethserver version: $nethserver_version"
+
+if [ "$upstream_version" != "$nethserver_version" ]; then
+    # Check that issue does not already exist
+    issue_number=$(curl -sH "Authorization: token $GITHUBTOKEN" "https://api.github.com/search/issues?q=\"mattermost+$upstream_version\"+in:title+repo:NethServer/new-release-checker+author:nethbot+is:open&sort=created" | jq -r '.items[0].number')
+
+    if [ -n "$issue_number" ] && [ "$issue_number" != "null" ]; then
+        echo "Issue already exists: #$issue_number"
+        exit 0
+    fi
+
+    # Create issue
+    url_issue=$(curl -sH "Authorization: token $GITHUBTOKEN" -d \
+        "{\"title\":\"Mattermost $upstream_version\", \"body\":\"Update Mattermost release to $upstream_version\n\nChangelog:\nhttps://docs.mattermost.com/administration/changelog.html\"}" \
+        "https://api.github.com/repos/NethServer/new-release-checker/issues" | jq -r '.html_url')
+
+    echo issue created: $url_issue # ////
+
+    # Retrieve master branch sha
+    master_sha=$(curl -sH "Authorization: token $GITHUBTOKEN" "https://api.github.com/repos/NethServer/new-release-checker/git/ref/heads/master" | jq -r '.object.sha')
+
+    echo master_sha: $master_sha # ////
+
+    # Create remote branch
+    error_msg=$(curl -sH "Authorization: token $GITHUBTOKEN" -X POST \
+        -d "{\"ref\":\"refs/heads/update-version-$upstream_version\", \"sha\":\"$master_sha\"}" \
+        "https://api.github.com/repos/NethServer/new-release-checker/git/refs" | jq -r '.message')
+
+    if [ -n "$error_msg" ] && [ "$error_msg" != "null" ]; then
+        echo "Error creating branch: $error_msg"
+        exit 1
+    fi
+
+    # Clone remote branch without checking out files
+    git clone -b update-version-$upstream_version -n "https://nethbot:$GITHUBTOKEN@github.com/NethServer/new-release-checker.git" --depth 1
+
+    cd new-release-checker
+
+    # Unstage deletion of all files
+    git reset HEAD
+
+    # Checkout spec file
+    git checkout README.md # //// spec file
+
+    # Escape point in upstream version
+    upstream_version_escaped=$(echo $upstream_version | sed -E 's/\./\\./g')
+
+    # Replace version in spec
+    sed -Ei "s/%define mattermost_release .+$/%define mattermost_release $upstream_version_escaped/" README.md
+
+    cat README.md # ////
+
+    git add README.md # //// spec file
+    git commit -m "Update to $upstream_version"
+    git push -u origin update-version-$upstream_version
+
+    # Create pull request
+    error_msg=$(curl -sH "Authorization: token $GITHUBTOKEN" -d "{\"title\":\"Update to $upstream_version\", \"body\":\"$url_issue\", \
+            \"head\": \"update-version-$upstream_version\", \"base\": \"master\"}" \
+        "https://api.github.com/repos/NethServer/new-release-checker/pulls" | jq -r '.message')
+
+    if [ -n "$error_msg" ] && [ "$error_msg" != "null" ]; then
+        echo "Error creating pull request: $error_msg"
+        exit 1
+    fi
+
+    echo "Pull request created"
+else
+    echo "Nethserver version is updated"
+fi
