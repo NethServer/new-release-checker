@@ -1,0 +1,123 @@
+#!/bin/bash
+
+if [ -z "$GITHUBTOKEN" ]; then
+    echo "GITHUBTOKEN not set"
+    exit 2
+fi
+
+# app_name='Mattermost' ////
+# upstream_owner='mattermost'
+# upstream_repo='mattermost-server'
+# ns_owner='NethServer'
+# ns_repo='nethserver-mattermost'
+# spec_var='mattermost_release'
+# changelog_url='https://docs.mattermost.com/administration/changelog.html'
+
+app_name='Nextcloud'
+upstream_owner='nextcloud'
+upstream_repo='server'
+ns_owner='NethServer'
+ns_repo='nethserver-nextcloud'
+spec_var='nc_version'
+changelog_url='https://nextcloud.com/changelog/'
+
+# Retrieve upstream version
+tags=$(curl -sH "Authorization: token $GITHUBTOKEN" "https://api.github.com/repos/$upstream_owner/$upstream_repo/tags")
+
+error_msg=$(echo "$tags" | jq -r '.message?')
+if [ -n "$error_msg" ] && [ "$error_msg" != "null" ]; then
+    echo "Error retrieving upstream tags: $error_msg"
+    exit 1
+fi
+
+upstream_version=$(echo "$tags" | jq -r '.[0].name' | sed -E 's/v//g')
+
+if [ -z "$upstream_version" ]; then
+    echo "Unable to retrieve upstream version"
+    exit 1
+elif [[ $upstream_version == *"RC"* ]] || [[ $upstream_version == *"rc"* ]] || [[ $upstream_version == *"beta"* ]]; then
+    echo "Latest upstream version is RC or beta: $upstream_version. Skipping"
+    exit 0
+fi
+
+# Retrieve Nethserver version
+nethserver_version=$(curl -sH "Authorization: token $GITHUBTOKEN" https://raw.githubusercontent.com/$ns_owner/$ns_repo/master/$ns_repo.spec |
+    grep "%define $spec_var" | awk '{print $3}')
+
+echo "$app_name upstream version: $upstream_version\n$app_name NethServer version: $nethserver_version"
+
+if [ "$upstream_version" != "$nethserver_version" ]; then
+    # Check that issue does not already exist
+
+    # change NethServer/new-release-checker to NethServer/dev ////
+    issue_number=$(curl -sH "Authorization: token $GITHUBTOKEN" "https://api.github.com/search/issues?q=\"$app_name+$upstream_version\"+in:title+repo:NethServer/new-release-checker+author:nethbot+is:open&sort=created" | jq -r '.items[0].number')
+
+    if [ -n "$issue_number" ] && [ "$issue_number" != "null" ]; then
+        echo "Issue already exists: #$issue_number"
+        exit 0
+    fi
+
+    # Create issue
+
+    # change NethServer/new-release-checker to NethServer/dev ////
+    url_issue=$(curl -sH "Authorization: token $GITHUBTOKEN" -d \
+        "{\"title\":\"$app_name $upstream_version\", \"body\":\"Update $app_name release to $upstream_version\n\nChangelog:\n$changelog_url\"}" \
+        "https://api.github.com/repos/NethServer/new-release-checker/issues" | jq -r '.html_url')
+
+    echo "Issue created: $url_issue"
+
+    # Retrieve master branch sha
+
+    # change NethServer/new-release-checker to $ns_owner/$ns_repo ////
+    master_sha=$(curl -sH "Authorization: token $GITHUBTOKEN" "https://api.github.com/repos/NethServer/new-release-checker/git/ref/heads/master" | jq -r '.object.sha')
+
+    echo master_sha: $master_sha # /////
+
+    # Create remote branch
+
+    # change NethServer/new-release-checker to $ns_owner/$ns_repo ////
+    error_msg=$(curl -sH "Authorization: token $GITHUBTOKEN" -X POST \
+        -d "{\"ref\":\"refs/heads/update-version-$upstream_version\", \"sha\":\"$master_sha\"}" \
+        "https://api.github.com/repos/NethServer/new-release-checker/git/refs" | jq -r '.message')
+
+    if [ -n "$error_msg" ] && [ "$error_msg" != "null" ]; then
+        echo "Error creating branch: $error_msg"
+        exit 1
+    fi
+
+    # Clone remote branch without checking out files
+
+    # change NethServer/new-release-checker to $ns_owner/$ns_repo ////
+    git clone -b update-version-$upstream_version -n "https://nethbot:$GITHUBTOKEN@github.com/NethServer/new-release-checker.git" --depth 1
+
+    # change new-release-checker to $ns_repo ////
+    cd new-release-checker
+
+    # Unstage deletion of all files
+    git reset HEAD
+
+    # Edit spec file and push changes
+    git checkout $ns_repo.spec
+    upstream_version_escaped=$(echo $upstream_version | sed -E 's/\./\\./g')
+    sed -Ei "s/%define $spec_var .+$/%define $spec_var $upstream_version_escaped/" $ns_repo.spec
+    git add $ns_repo.spec
+    git commit -m "Update to $upstream_version"
+    git push -u origin update-version-$upstream_version
+
+    # Create pull request
+
+    # change NethServer/new-release-checker to $ns_owner/$ns_repo ////
+    pull_request=$(curl -sH "Authorization: token $GITHUBTOKEN" -d "{\"title\":\"Update to $upstream_version\", \"body\":\"$url_issue\", \
+            \"head\": \"update-version-$upstream_version\", \"base\": \"master\"}" \
+        "https://api.github.com/repos/NethServer/new-release-checker/pulls")
+
+    error_msg=$(echo "$pull_request" | jq -r '.message?')
+    if [ -n "$error_msg" ] && [ "$error_msg" != "null" ]; then
+        echo "Error creating pull request: $error_msg"
+        exit 1
+    fi
+
+    echo "Pull request created: $(echo "$pull_request" | jq -r '.html_url')"
+else
+    echo "NethServer version is updated"
+fi
