@@ -68,7 +68,7 @@ do
 
         # Clone remote branch without checking out files
         git clone -b update-version-$upstream_version -n "https://nethbot:$GITHUBTOKEN@github.com/$ns_owner/$ns_repo.git" --depth 1
-        cd $ns_repo
+        pushd $ns_repo
 
         # Unstage deletion of all files
         git reset HEAD
@@ -94,7 +94,7 @@ do
 
         echo "Pull request created: $(echo "$pull_request" | jq -r '.html_url')"
 
-        cd ..
+        popd
         rm -rf $ns_repo/
     else
         echo "$app_name NethServer version is updated"
