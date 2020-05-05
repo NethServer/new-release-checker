@@ -25,13 +25,16 @@ if [ -z "$GITHUBTOKEN" ]; then
     exit 2
 fi
 
+# Case insensitive string match
+shopt -s nocasematch
+
 for app_config in "."/*.cfg; do
     # Read app configuration
     . "$app_config"
 
     echo -e "\\nChecking $app_name version..."
 
-    # Retrieve upstream version
+    # Retrieve latest stable upstream version
     tags=$(curl -sH "Authorization: token $GITHUBTOKEN" "https://api.github.com/repos/$upstream_owner/$upstream_repo/tags")
 
     error_msg=$(echo "$tags" | jq -r '.message?')
@@ -40,15 +43,22 @@ for app_config in "."/*.cfg; do
         exit 1
     fi
 
-    upstream_version=$(echo "$tags" | jq -r '.[0].name' | sed -E 's/v//g')
+    NEWEST_TAG_INDEX=0
+    STABLE_VERSION_FOUND=false
 
-    if [ -z "$upstream_version" ]; then
-        echo "Unable to retrieve upstream version"
-        exit 1
-    elif [[ $upstream_version == *"RC"* ]] || [[ $upstream_version == *"rc"* ]] || [[ $upstream_version == *"beta"* ]]; then
-        echo "Latest upstream version is RC or beta: $upstream_version. Skipping"
-        continue
-    fi
+    while ! $STABLE_VERSION_FOUND; do
+        upstream_version=$(echo "$tags" | jq -r ".[$NEWEST_TAG_INDEX].name" | sed -E 's/v//g')
+
+        if [ -z "$upstream_version" ]; then
+            echo "Unable to retrieve upstream version"
+            exit 1
+        elif [[ $upstream_version == *"rc"* ]] || [[ $upstream_version == *"beta"* ]] || [[ $upstream_version == *"alpha"* ]]; then
+            echo "Upstream version is RC or beta: $upstream_version. Checking next tag..."
+            NEWEST_TAG_INDEX=$((NEWEST_TAG_INDEX+1))
+        else
+            STABLE_VERSION_FOUND=true
+        fi
+    done
 
     # Retrieve Nethserver version
     nethserver_version=$(curl -sH "Authorization: token $GITHUBTOKEN" https://raw.githubusercontent.com/$ns_owner/$ns_repo/master/$ns_repo.spec |
