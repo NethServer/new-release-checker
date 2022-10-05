@@ -1,0 +1,13 @@
+name: Check Releases
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 2 * * *"
+jobs:
+  check-releases:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v3
+      - run: bash check-new-release
+        env:
+          GITHUBTOKEN: ${{ github.token }}
