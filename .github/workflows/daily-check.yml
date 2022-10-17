@@ -10,4 +10,4 @@ jobs:
       - uses: actions/checkout@v3
       - run: bash check-new-release
         env:
-          GITHUBTOKEN: ${{ github.token }}
+          GITHUBTOKEN: ${{ secrets.nethbot_token }}
