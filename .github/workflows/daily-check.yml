@@ -11,3 +11,5 @@ jobs:
       - run: bash check-new-release
         env:
           GITHUBTOKEN: ${{ secrets.nethbot_token }}
+          GIT_COMMITTER_NAME: "NethBot"
+          GIT_COMMITTER_EMAIL: "sviluppo@nethesis.it"

@@ -107,7 +107,7 @@ for app_config in "."/*.cfg; do
         upstream_version_escaped=$(echo $upstream_version | sed -E 's/\./\\./g')
         sed -Ei "s/%define $spec_var .+$/%define $spec_var $upstream_version_escaped/" $ns_repo.spec
         git add $ns_repo.spec
-        git commit -m "Update to $upstream_version" --author="NethBot <sviluppo@nethesis.it>"
+        git commit -m "Update to $upstream_version"
         git push -u origin update-version-$upstream_version
 
         # Create pull request
