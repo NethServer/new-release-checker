@@ -99,6 +99,10 @@ for app_config in "."/*.cfg; do
         git clone -b update-version-$upstream_version -n "https://nethbot:$GITHUBTOKEN@github.com/$ns_owner/$ns_repo.git" --depth 1
         pushd $ns_repo
 
+        # Configure git
+        git config user.name "NethBot"
+        git config user.email "sviluppo@nethesis.it"
+
         # Unstage deletion of all files
         git reset HEAD
 
